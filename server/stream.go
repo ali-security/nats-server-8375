@@ -642,6 +642,7 @@ const (
 	JSSchedulePattern         = "Nats-Schedule"
 	JSScheduleTimeZone        = "Nats-Schedule-Time-Zone"
 	JSScheduleTTL             = "Nats-Schedule-TTL"
+	JSScheduleRollup          = "Nats-Schedule-Rollup"
 	JSScheduleTarget          = "Nats-Schedule-Target"
 	JSScheduleSource          = "Nats-Schedule-Source"
 )
@@ -5064,6 +5065,11 @@ func getMessageScheduleTTL(hdr []byte) (string, bool) {
 	return string(ttl), true
 }
 
+// Fast lookup of the message schedule rollup from headers.
+func getMessageScheduleRollup(hdr []byte) string {
+	return bytesToString(sliceHeader(JSScheduleRollup, hdr))
+}
+
 // Fast lookup of message schedule target.
 func getMessageScheduleTarget(hdr []byte) string {
 	if len(hdr) == 0 {
@@ -6038,6 +6044,15 @@ func (mset *stream) processJetStreamMsgWithBatch(subject, reply string, hdr, msg
 						outq.sendMsg(reply, b)
 					}
 					return apiErr
+				} else if scheduleRollup := getMessageScheduleRollup(hdr); scheduleRollup != _EMPTY_ && scheduleRollup != JSMsgRollupSubject {
+					apiErr := NewJSMessageSchedulesRollupInvalidError()
+					if canRespond {
+						resp.PubAck = &PubAck{Stream: name}
+						resp.Error = apiErr
+						b, _ := json.Marshal(resp)
+						outq.sendMsg(reply, b)
+					}
+					return apiErr
 				} else if scheduleTtl != _EMPTY_ && !mset.cfg.AllowMsgTTL {
 					if canRespond {
 						resp.PubAck = &PubAck{Stream: name}
@@ -6532,7 +6547,8 @@ func (mset *stream) processJetStreamMsgWithBatch(subject, reply string, hdr, msg
 		if _, err = mset.purgeLocked(&JSApiStreamPurgeRequest{Keep: 1}, false); err != nil {
 			return err
 		}
-	} else if scheduleNext := sliceHeader(JSScheduleNext, hdr); len(scheduleNext) > 0 && bytesToString(scheduleNext) == JSScheduleNextPurge {
+	}
+	if scheduleNext := sliceHeader(JSScheduleNext, hdr); len(scheduleNext) > 0 && bytesToString(scheduleNext) == JSScheduleNextPurge {
 		// Purge the message schedule.
 		scheduler := getMessageScheduler(hdr)
 		if scheduler != _EMPTY_ {
